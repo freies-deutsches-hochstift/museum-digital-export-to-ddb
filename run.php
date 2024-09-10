@@ -33,6 +33,12 @@ function fetch(string $outfile, string $type, string $query) {
         throw new Exception("Cannot write to output file: " . $outfile);
     }
 
+    // Back up current file
+    $backupFile = "/tmp/" . uniqid(basename($outfile)) . ".bak";
+    if (is_file($outfile)) {
+        copy($outfile, $backupFile);
+    }
+
     $exportUrl = MUSDB_INSTANCE . '/musdb/api/export/objects_quick/' . urlencode($type) . '?s=' . urlencode($query);
     $exportGenTime = MUSDB_INSTANCE . '/musdb/api/meta/get_quick_export_update_time/' . urlencode($type) . '?s=' . urlencode($query);
 
@@ -44,19 +50,21 @@ function fetch(string $outfile, string $type, string $query) {
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
         $result = curl_exec($ch);
         if (curl_errno($ch)) {
-            throw new Exception("Failed to download " . $url . PHP_EOL . PHP_EOL . "Error: " . curl_error($ch));
+            throw new Exception("Failed to download " . $exportGenTime . PHP_EOL . PHP_EOL . "Error: " . curl_error($ch));
         }
         curl_close($ch);
 
         if (!($updateTimeData = json_decode($result, true))) {
             throw new Exception("Failed to get last update time");
         }
+        /*
         if ($updateTimeData['update_time'] < filemtime($outfile)) {
             echo "Export has already been generated more recently than the export dumps" . PHP_EOL;
             return;
         }
+         */
 
-        if (unlink($outfile)) echo "Unlinked outfile: " . $outfile;
+        if (unlink($outfile)) echo "Unlinked outfile: " . $outfile . PHP_EOL;
 
     }
 
@@ -68,7 +76,12 @@ function fetch(string $outfile, string $type, string $query) {
 
     $result = curl_exec($ch);
     if (curl_errno($ch)) {
-        throw new Exception("Failed to download " . $url . PHP_EOL . PHP_EOL . "Error: " . curl_error($ch));
+        throw new Exception("Failed to download " . $exportUrl . PHP_EOL . PHP_EOL . "Error: " . curl_error($ch));
+    }
+
+    // Get info to check status of request
+    if (!($info = curl_getinfo($ch))) {
+        throw new Exception("Failed to get status of request");
     }
 
     curl_close($ch);
@@ -77,9 +90,20 @@ function fetch(string $outfile, string $type, string $query) {
     $msg = 'A quick export has been run using the search query \'' . $query . '\'. Exported to file: ' . basename($outfile);
     echo $msg . PHP_EOL;
 
-    mail(implode(', ', MAIL_NOTIFICATION_TO),
-        "Targetted musdb export succeeded",
-        $msg);
+    // Request failed: Recreate backup
+    // A filesize below 2048 signals a failure due to error messages being around 1KB large
+    if (((int)$info['http_code'] !== 200 || filesize($outfile) < 2048) && file_exists($backupFile)) {
+        echo PHP_EOL . "Request failed. Will recreate from backup file." . PHP_EOL;
+        copy($backupFile, $outfile);
+    }
+
+    else {
+        /*
+        mail(implode(', ', MAIL_NOTIFICATION_TO),
+            "Targetted musdb export succeeded",
+            $msg);
+        */
+    }
 
 }
 
